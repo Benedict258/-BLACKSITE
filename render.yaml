@@ -3,7 +3,7 @@ services:
     name: blacksite
     env: static
     buildCommand: npm run build
-    staticPublishPath: out
+    staticPublishPath: dist
     routes:
       - type: rewrite
         source: /*
