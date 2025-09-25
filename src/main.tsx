@@ -6,6 +6,10 @@ import "react-quill/dist/quill.snow.css";
 createRoot(document.getElementById("root")!).render(<App />);
 
 // Register PWA service worker (vite-plugin-pwa)
-if (typeof window !== 'undefined') {
-	import('../dist/registerSW.js').catch(() => {});
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+	import('virtual:pwa-register').then(({ registerSW }) => {
+		try {
+			registerSW({ immediate: true });
+		} catch {}
+	}).catch(() => {});
 }
