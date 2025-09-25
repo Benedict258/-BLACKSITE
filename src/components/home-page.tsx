@@ -100,6 +100,13 @@ export function HomePage({ onCreateRoom, onJoinRoom }: HomePageProps = {}) {
         </div>
       </main>
 
+      {/* Footer - Home page only */}
+      <footer className="border-t border-border/40">
+        <div className="container mx-auto px-4 py-6 text-center text-xs text-muted-foreground">
+          Built By DevChronicles, Jaynetikz & Yorwins Tech
+        </div>
+      </footer>
+
       {/* Modals */}
       <CreateRoomModal open={showCreateModal} onOpenChange={setShowCreateModal} />
       <JoinRoomModal open={showJoinModal} onOpenChange={setShowJoinModal} />
