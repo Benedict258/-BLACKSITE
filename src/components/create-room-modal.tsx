@@ -89,7 +89,7 @@ export function CreateRoomModal({ open, onOpenChange }: CreateRoomModalProps) {
         throw error;
       }
 
-      const joinUrl = `${window.location.origin}/room/${roomCode}`;
+  const joinUrl = `${window.location.origin}/#/room/${roomCode}`;
       
               // Store owner token for room management
               localStorage.setItem(`blacksite_owner_${roomCode}`, ownerToken);
@@ -207,6 +207,7 @@ export function CreateRoomModal({ open, onOpenChange }: CreateRoomModalProps) {
                   displayName: 'Room Creator',
                   joinedAt: new Date().toISOString(),
                 }));
+                // Navigate using hash URL to avoid server 404s on static hosting
                 window.location.href = createdRoom.joinUrl;
               }}
               variant="neon" 
