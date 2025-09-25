@@ -108,6 +108,19 @@
   }
 }
 
+/* Quill editor tweaks */
+.ql-toolbar.ql-snow {
+  border-bottom: 1px solid hsl(var(--border));
+}
+.ql-container.ql-snow {
+  border: none;
+}
+
+/* Prose content inside posts */
+.prose :where(p, ul, ol) {
+  margin: 0.25rem 0;
+}
+
 @layer base {
   * {
     @apply border-border;

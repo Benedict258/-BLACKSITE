@@ -1,9 +1,11 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo, useCallback } from "react";
 import { Send, Image, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import ReactQuill from "react-quill";
+import "react-quill/dist/quill.snow.css";
+import DOMPurify from "dompurify";
 
 interface PostComposerProps {
   roomId: string;
@@ -13,7 +15,8 @@ interface PostComposerProps {
 }
 
 export function PostComposer({ roomId, displayName, onPostCreated, placeholder = "What's on your mind?" }: PostComposerProps) {
-  const [content, setContent] = useState("");
+  // content is HTML string from Quill
+  const [content, setContent] = useState("<p></p>");
   const [isPosting, setIsPosting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -23,6 +26,34 @@ export function PostComposer({ roomId, displayName, onPostCreated, placeholder =
   const MAX_VIDEO_BYTES = 50 * 1024 * 1024; // 50MB
   const ALLOWED_IMAGE = ["image/jpeg", "image/png", "image/webp"];
   const ALLOWED_VIDEO = ["video/mp4", "video/webm"];
+
+  // Quill toolbar configuration: bold, italic (slant), strike, font size, font family
+  const quillModules = useMemo(() => ({
+    toolbar: [
+      [{ font: [] }],
+      [{ size: ["small", false, "large", "huge"] }],
+      ["bold", "italic", "strike"],
+      ["clean"],
+    ],
+    keyboard: {
+      bindings: {
+        // Ctrl+Enter to post
+        submit: {
+          key: 13,
+          shortKey: true,
+          handler: () => {
+            handlePost();
+            return false;
+          },
+        },
+      },
+    },
+  }), []);
+
+  const quillFormats = useMemo(
+    () => ["bold", "italic", "strike", "size", "font"],
+    []
+  );
 
   const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const incoming = Array.from(e.target.files || []);
@@ -93,8 +124,11 @@ export function PostComposer({ roomId, displayName, onPostCreated, placeholder =
     return uploaded;
   }
 
+  const stripHtml = useCallback((html: string) => html.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim(), []);
+
   const handlePost = async () => {
-    if (!content.trim() && files.length === 0) {
+    const textOnly = stripHtml(content || "");
+    if (!textOnly && files.length === 0) {
       toast({
         title: "Content required",
         description: "Add text or attach media to post",
@@ -109,12 +143,17 @@ export function PostComposer({ roomId, displayName, onPostCreated, placeholder =
       // Upload media first (if any)
       const mediaUploads = await uploadSelectedFiles();
 
+      // Sanitize HTML but preserve Quill classes needed for font/size
+      const safeHtml = DOMPurify.sanitize(content || "", {
+        ALLOWED_ATTR: ["class", "style", "href", "rel", "target"],
+      });
+
       const { error } = await supabase
         .from('posts')
         .insert({
           room_id: roomId,
           author_display: displayName,
-          content: content.trim(),
+          content: safeHtml,
           media: mediaUploads.map(m => ({ url: m.url, type: m.type, size: m.size })),
         });
 
@@ -122,7 +161,7 @@ export function PostComposer({ roomId, displayName, onPostCreated, placeholder =
         throw error;
       }
 
-      setContent("");
+      setContent("<p></p>");
       setFiles([]);
       onPostCreated?.();
       
@@ -139,13 +178,6 @@ export function PostComposer({ roomId, displayName, onPostCreated, placeholder =
       });
     } finally {
       setIsPosting(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handlePost();
     }
   };
 
@@ -168,15 +200,16 @@ export function PostComposer({ roomId, displayName, onPostCreated, placeholder =
           ))}
         </div>
       )}
-      <Input
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder}
-        className="flex-1"
-        disabled={isPosting}
-        maxLength={1000}
-      />
+      <div className="rounded-md border border-border/50 bg-background">
+        <ReactQuill
+          theme="snow"
+          value={content}
+          onChange={setContent}
+          modules={quillModules}
+          formats={quillFormats}
+          placeholder={placeholder}
+        />
+      </div>
       
       <input
         type="file"

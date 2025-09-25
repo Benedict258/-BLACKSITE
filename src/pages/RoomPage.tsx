@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import DOMPurify from "dompurify";
+import ReactQuill from "react-quill";
 import { useParams, Navigate, useNavigate } from "react-router-dom";
 import { Send, Image, Pin, Flag, MoreHorizontal, Trash2, UserX, ArrowLeft, Users, Code, Settings, Pencil, Reply } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -265,9 +267,10 @@ export function RoomPage() {
     if (!canEdit) return;
 
     try {
+      const safeHtml = DOMPurify.sanitize(editingContent || "");
       const { error } = await supabase
         .from('posts')
-        .update({ content: editingContent.trim(), edited_at: new Date().toISOString() })
+        .update({ content: safeHtml, edited_at: new Date().toISOString() })
         .eq('id', editingPostId);
       if (error) throw error;
       setEditingPostId(null);
@@ -529,67 +532,84 @@ export function RoomPage() {
                   <div className="mb-4">
                     {editingPostId === post.id ? (
                       <div className="space-y-2">
-                        <Textarea value={editingContent} onChange={(e) => setEditingContent(e.target.value)} rows={3} />
+                        <div className="rounded-md border border-border/50 bg-background">
+                          <ReactQuill theme="snow" value={editingContent} onChange={setEditingContent} />
+                        </div>
                         <div className="flex gap-2">
-                          <Button size="sm" variant="neon" onClick={saveEditPost} disabled={!editingContent.trim()}>Save</Button>
+                          <Button size="sm" variant="neon" onClick={saveEditPost} disabled={!editingContent || editingContent === '<p></p>'}>Save</Button>
                           <Button size="sm" variant="outline" onClick={() => { setEditingPostId(null); setEditingContent(""); }}>Cancel</Button>
                         </div>
                       </div>
                     ) : (
-                      <p className="text-foreground leading-relaxed whitespace-pre-wrap">{post.content}</p>
+                      <div
+                        className="prose prose-sm dark:prose-invert max-w-none"
+                        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(post.content || "") }}
+                      />
                     )}
                   </div>
 
                   {/* Post Media */}
-                  {Array.isArray(post.media) && post.media.length > 0 && (
-                    <div className={`mb-4 ${post.media.length > 1 ? 'grid grid-cols-2 gap-2' : ''}`}>
-                      {post.media.map((m: any, idx: number) => {
-                        const key = (m && m.url) || idx;
-                        const t = (m && m.type) || '';
-                        const isImage = typeof t === 'string' ? t.startsWith('image') || t === 'image' : false;
-                        const isVideo = typeof t === 'string' ? t.startsWith('video') || t === 'video' : false;
-                        if (isImage) {
+                    {Array.isArray(post.media) && post.media.length > 0 && (
+                      <div className={`mb-4 ${post.media.length > 1 ? 'grid grid-cols-2 gap-2' : ''}`}>
+                        {post.media.map((m: any, idx: number) => {
+                          const key = (m && m.url) || idx;
+                          const t = (m && m.type) || '';
+                          const isImage = typeof t === 'string' ? t.startsWith('image') || t === 'image' : false;
+                          const isVideo = typeof t === 'string' ? t.startsWith('video') || t === 'video' : false;
+                          if (isImage) {
+                            return (
+                              <div
+                                key={key}
+                                className={`${post.media.length === 1 ? 'block' : 'block'} rounded-md border border-border/50 bg-background relative select-none`}
+                                style={{ userSelect: 'none' }}
+                                onContextMenu={e => e.preventDefault()}
+                                onDragStart={e => e.preventDefault()}
+                              >
+                                <img
+                                  src={m.url}
+                                  alt="attachment"
+                                  loading="lazy"
+                                  className="w-full h-auto max-h-[85vh] object-contain pointer-events-none select-none"
+                                  draggable={false}
+                                  onContextMenu={e => e.preventDefault()}
+                                />
+                                {/* Overlay to block right-click/save-as */}
+                                <div className="absolute inset-0 z-10" style={{ pointerEvents: 'none', background: 'transparent' }} />
+                              </div>
+                            );
+                          }
+                          if (isVideo) {
+                            return (
+                              <div
+                                key={key}
+                                className={`${post.media.length === 1 ? 'block' : 'block'} rounded-md border border-border/50 bg-black relative select-none`}
+                                style={{ userSelect: 'none' }}
+                                onContextMenu={e => e.preventDefault()}
+                                onDragStart={e => e.preventDefault()}
+                              >
+                                <video
+                                  src={m.url}
+                                  controls
+                                  controlsList="nodownload noremoteplayback"
+                                  preload="metadata"
+                                  className="w-full h-auto max-h-[85vh] pointer-events-none select-none"
+                                  draggable={false}
+                                  onContextMenu={e => e.preventDefault()}
+                                />
+                                {/* Overlay to block right-click */}
+                                <div className="absolute inset-0 z-10" style={{ pointerEvents: 'none', background: 'transparent' }} />
+                              </div>
+                            );
+                          }
+                          // Unknown type: render link (keep as is)
                           return (
-                            <a
-                              key={key}
-                              href={m.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className={`${post.media.length === 1 ? 'block' : 'block'} rounded-md border border-border/50 bg-background`}
-                            >
-                              <img
-                                src={m.url}
-                                alt="attachment"
-                                loading="lazy"
-                                className="w-full h-auto max-h-[85vh] object-contain"
-                              />
+                            <a key={key} href={m.url} target="_blank" rel="noreferrer" className="text-sm underline break-all">
+                              {m.url}
                             </a>
                           );
-                        }
-                        if (isVideo) {
-                          return (
-                            <div
-                              key={key}
-                              className={`${post.media.length === 1 ? 'block' : 'block'} rounded-md border border-border/50 bg-black`}
-                            >
-                              <video
-                                src={m.url}
-                                controls
-                                preload="metadata"
-                                className="w-full h-auto max-h-[85vh]"
-                              />
-                            </div>
-                          );
-                        }
-                        // Unknown type: render link
-                        return (
-                          <a key={key} href={m.url} target="_blank" rel="noreferrer" className="text-sm underline break-all">
-                            {m.url}
-                          </a>
-                        );
-                      })}
-                    </div>
-                  )}
+                        })}
+                      </div>
+                    )}
 
                   {/* Post Actions */}
                   <div className="flex items-center justify-between">
