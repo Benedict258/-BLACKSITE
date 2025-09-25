@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, Navigate, useNavigate } from "react-router-dom";
-import { Send, Image, Pin, Flag, MoreHorizontal, Trash2, UserX, ArrowLeft, Users, Code, Settings } from "lucide-react";
+import { Send, Image, Pin, Flag, MoreHorizontal, Trash2, UserX, ArrowLeft, Users, Code, Settings, Pencil, Reply } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -38,6 +38,10 @@ export function RoomPage() {
   const [joinName, setJoinName] = useState("");
   const [joining, setJoining] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [editingPostId, setEditingPostId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState<string>("");
+  const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null);
+  const [expandedCommentIds, setExpandedCommentIds] = useState<Set<string>>(new Set());
 
   // Load session from localStorage
   useEffect(() => {
@@ -221,7 +225,9 @@ export function RoomPage() {
   };
 
   const handleDelete = async (postId: string) => {
-    if (!session?.isOwner) return;
+    const post = posts.find(p => p.id === postId);
+    const canDelete = session?.isOwner || (post && post.author_display === session?.displayName);
+    if (!canDelete) return;
     
     try {
       const { error } = await supabase
@@ -244,6 +250,33 @@ export function RoomPage() {
         description: "Failed to delete post",
         variant: "destructive",
       });
+    }
+  };
+
+  const startEditPost = (postId: string, current: string) => {
+    setEditingPostId(postId);
+    setEditingContent(current);
+  };
+
+  const saveEditPost = async () => {
+    if (!editingPostId) return;
+    const post = posts.find(p => p.id === editingPostId);
+    const canEdit = post && post.author_display === session?.displayName;
+    if (!canEdit) return;
+
+    try {
+      const { error } = await supabase
+        .from('posts')
+        .update({ content: editingContent.trim(), edited_at: new Date().toISOString() })
+        .eq('id', editingPostId);
+      if (error) throw error;
+      setEditingPostId(null);
+      setEditingContent("");
+      reloadPosts();
+      toast({ title: 'Post updated' });
+    } catch (e) {
+      console.error('Error updating post:', e);
+      toast({ title: 'Error', description: 'Failed to update post', variant: 'destructive' });
     }
   };
 
@@ -276,6 +309,82 @@ export function RoomPage() {
   const pinnedPosts = posts.filter(post => post.pinned);
   const regularPosts = posts.filter(post => !post.pinned);
   const orderedPosts = [...pinnedPosts, ...regularPosts];
+
+  // Recursive comment item to support replies to replies
+  const CommentItem = ({ comment, postId, depth = 0 }: { comment: any; postId: string; depth?: number }) => {
+    const directReplyCount = Array.isArray(comment.replies) ? comment.replies.length : 0;
+    const expanded = expandedCommentIds.has(comment.id);
+    const toggleReplies = () => {
+      setExpandedCommentIds(prev => {
+        const next = new Set(prev);
+        if (next.has(comment.id)) next.delete(comment.id); else next.add(comment.id);
+        return next;
+      });
+    };
+    return (
+      <div className={depth === 0 ? "flex gap-3" : "ml-6 flex gap-2"}>
+        <Avatar className={depth === 0 ? "w-6 h-6" : "w-5 h-5"}>
+          <AvatarFallback className="text-xs bg-muted">
+            {comment.author_display?.charAt(0)?.toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={depth === 0 ? "text-sm font-medium" : "text-xs font-medium"}>{comment.author_display}</span>
+            <span className="text-xs text-muted-foreground">{formatTimestamp(comment.created_at)}</span>
+          </div>
+          <p className={depth === 0 ? "text-sm text-muted-foreground whitespace-pre-wrap" : "text-xs text-muted-foreground whitespace-pre-wrap"}>
+            {comment.content}
+          </p>
+          <div className="mt-1 flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={() => setReplyingToCommentId(comment.id)}
+            >
+              <Reply className="w-3 h-3 mr-1" /> Reply
+            </Button>
+            {directReplyCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={toggleReplies}
+              >
+                {expanded ? `Hide ${directReplyCount} repl${directReplyCount === 1 ? 'y' : 'ies'}` : `View ${directReplyCount} repl${directReplyCount === 1 ? 'y' : 'ies'}`}
+              </Button>
+            )}
+          </div>
+
+          {replyingToCommentId === comment.id && (
+            <div className="mt-2 ml-6">
+              <CommentComposer
+                postId={postId}
+                parentCommentId={comment.id}
+                displayName={session!.displayName}
+                onCommentCreated={() => {
+                  setReplyingToCommentId(null);
+                  reloadPosts();
+                }}
+                onCancel={() => setReplyingToCommentId(null)}
+                placeholder={`Reply to ${comment.author_display}...`}
+                autoFocus
+              />
+            </div>
+          )}
+
+          {expanded && comment.replies && comment.replies.length > 0 && (
+            <div className="mt-2 space-y-2">
+              {comment.replies.map((child: any) => (
+                <CommentItem key={child.id} comment={child} postId={postId} depth={depth + 1} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -387,6 +496,12 @@ export function RoomPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        {post.author_display === session.displayName && (
+                          <DropdownMenuItem onClick={() => startEditPost(post.id, post.content)}>
+                            <Pencil className="w-4 h-4 mr-2" />
+                            Edit
+                          </DropdownMenuItem>
+                        )}
                         {session.isOwner && !post.pinned && (
                           <DropdownMenuItem onClick={() => handlePin(post.id)}>
                             <Pin className="w-4 h-4 mr-2" />
@@ -397,7 +512,7 @@ export function RoomPage() {
                           <Flag className="w-4 h-4 mr-2" />
                           Report
                         </DropdownMenuItem>
-                        {session.isOwner && (
+                        {(session.isOwner || post.author_display === session.displayName) && (
                           <DropdownMenuItem 
                             onClick={() => handleDelete(post.id)}
                             className="text-destructive"
@@ -410,9 +525,19 @@ export function RoomPage() {
                     </DropdownMenu>
                   </div>
 
-                  {/* Post Content */}
+                  {/* Post Content / Edit */}
                   <div className="mb-4">
-                    <p className="text-foreground leading-relaxed whitespace-pre-wrap">{post.content}</p>
+                    {editingPostId === post.id ? (
+                      <div className="space-y-2">
+                        <Textarea value={editingContent} onChange={(e) => setEditingContent(e.target.value)} rows={3} />
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="neon" onClick={saveEditPost} disabled={!editingContent.trim()}>Save</Button>
+                          <Button size="sm" variant="outline" onClick={() => { setEditingPostId(null); setEditingContent(""); }}>Cancel</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-foreground leading-relaxed whitespace-pre-wrap">{post.content}</p>
+                    )}
                   </div>
 
                   {/* Post Media */}
@@ -474,69 +599,23 @@ export function RoomPage() {
                       onClick={() => toggleComments(post.id)}
                       className="text-muted-foreground"
                     >
-                      {post.comment_count && post.comment_count > 0 
-                        ? `${post.comment_count} ${post.comment_count === 1 ? 'comment' : 'comments'}` 
-                        : 'Add comment'
-                      }
+                      {(post.comment_count ?? post.comments?.length ?? 0) > 0
+                        ? `${post.comment_count ?? post.comments?.length} ${((post.comment_count ?? post.comments?.length) === 1) ? 'comment' : 'comments'}`
+                        : 'Add comment'}
                     </Button>
                   </div>
 
                   {/* Comments Section */}
                   {expandedComments.has(post.id) && (
                     <div className="mt-6 pt-4 border-t border-border/50">
-                      {/* Existing Comments */}
                       {post.comments && post.comments.length > 0 && (
                         <div className="space-y-4 mb-4">
                           {post.comments.map((comment) => (
-                            <div key={comment.id} className="flex gap-3">
-                              <Avatar className="w-6 h-6">
-                                <AvatarFallback className="text-xs bg-muted">
-                                  {comment.author_display.charAt(0).toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className="text-sm font-medium">{comment.author_display}</span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {formatTimestamp(comment.created_at)}
-                                  </span>
-                                </div>
-                                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                                  {comment.content}
-                                </p>
-                                
-                                {/* Nested replies */}
-                                {comment.replies && comment.replies.length > 0 && (
-                                  <div className="mt-2 ml-4 space-y-2">
-                                    {comment.replies.map((reply) => (
-                                      <div key={reply.id} className="flex gap-2">
-                                        <Avatar className="w-5 h-5">
-                                          <AvatarFallback className="text-xs bg-muted">
-                                            {reply.author_display.charAt(0).toUpperCase()}
-                                          </AvatarFallback>
-                                        </Avatar>
-                                        <div className="flex-1">
-                                          <div className="flex items-center gap-2 mb-1">
-                                            <span className="text-xs font-medium">{reply.author_display}</span>
-                                            <span className="text-xs text-muted-foreground">
-                                              {formatTimestamp(reply.created_at)}
-                                            </span>
-                                          </div>
-                                          <p className="text-xs text-muted-foreground whitespace-pre-wrap">
-                                            {reply.content}
-                                          </p>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
+                            <CommentItem key={comment.id} comment={comment} postId={post.id} />
                           ))}
                         </div>
                       )}
 
-                      {/* Comment Composer */}
                       <CommentComposer
                         postId={post.id}
                         displayName={session.displayName}
